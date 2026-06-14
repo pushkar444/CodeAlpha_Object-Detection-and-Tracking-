@@ -65,6 +65,13 @@ CodeAlpha_ObjectDetectionTracking/
 └── README.md
 ```
 
+## 🌐 Host the web demo
+This repo includes the browser demo in `docs/`, which is ready for GitHub Pages publishing.
+
+1. Go to your GitHub repo Settings → Pages.
+2. Select branch `main` and folder `/docs`.
+3. Save and wait for the site to appear at `https://pushkar444.github.io/CodeAlpha_Object-Detection-and-Tracking-/`.
+
 ---
 
 ## ▶️ Run it
