@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Object Detection &amp; Tracking</title>
+  <meta name="description" content="Real-time object detection and tracking that runs entirely in your browser using TensorFlow.js. Your video never leaves your device." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+
+  <!-- TensorFlow.js + the pre-trained COCO-SSD detector (loaded from CDN) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <script defer src="js/app.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <h1>Live Object Detection &amp; Tracking</h1>
+      <p>Runs entirely in your browser with TensorFlow.js — your camera feed never leaves your device.</p>
+    </header>
+
+    <section class="stage">
+      <div class="viewport" id="viewport">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="placeholder" id="placeholder">
+          <p>Press <strong>Start camera</strong> to begin.</p>
+          <p class="hint">You'll be asked for camera permission. Nothing is uploaded.</p>
+        </div>
+      </div>
+
+      <div class="hud">
+        <span id="fps">FPS: —</span>
+        <span id="objects">Objects: 0</span>
+        <span id="status" class="status">Loading model…</span>
+      </div>
+    </section>
+
+    <section class="controls">
+      <button id="toggle" class="btn" disabled>Start camera</button>
+
+      <label class="field">
+        <span>Camera</span>
+        <select id="camera" disabled></select>
+      </label>
+
+      <label class="field">
+        <span>Confidence: <b id="confVal">50%</b></span>
+        <input id="conf" type="range" min="20" max="90" value="50" />
+      </label>
+    </section>
+
+    <footer class="foot">
+      <p>CodeAlpha · Artificial Intelligence Internship · Task 4 — web demo</p>
+    </footer>
+  </main>
+</body>
+</html>
