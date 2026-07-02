@@ -1,10 +1,7 @@
-// Live object detection + tracking, fully in the browser.
+// Live object detection + tracking through the deployed Flask/YOLO server.
 //
-// - getUserMedia for the camera (the visitor's own — works for anyone)
-// - TensorFlow.js COCO-SSD for detection (80 classes, same as YOLO/COCO)
-// - a small IoU tracker (below) to give each object a persistent ID
-//
-// Nothing is sent to a server; detection happens on the user's device.
+// The visitor only grants camera permission. Frames are captured in the browser,
+// sent to /api/detect, and the server returns boxes with stable tracking IDs.
 
 const els = {
   video: document.getElementById("video"),
@@ -20,27 +17,35 @@ const els = {
 };
 
 const ctx = els.overlay.getContext("2d");
+const captureCanvas = document.createElement("canvas");
+const captureCtx = captureCanvas.getContext("2d");
 
-let model = null;
 let stream = null;
 let running = false;
+let sessionId = null;
 let confThreshold = 0.5;
-const tracker = new IoUTracker();
+let inFlight = false;
+let lastTime = performance.now();
+let smoothedFps = 0;
 
-// ---- model loads as soon as the CDN scripts are ready ----
 window.addEventListener("load", async () => {
   try {
-    setStatus("Loading model…");
-    model = await cocoSsd.load();           // default mobilenet_v2 base
+    setStatus("Connecting to server...");
+    const health = await fetch("/api/health");
+    if (!health.ok) throw new Error("health check failed");
+
+    const session = await fetch("/api/session", { method: "POST" });
+    const data = await session.json();
+    sessionId = data.sessionId;
+
     setStatus("Ready");
     els.toggle.disabled = false;
   } catch (err) {
-    setStatus("Could not load the model — check your connection.");
+    setStatus("Server unavailable. Deploy/run the Flask app.");
     console.error(err);
   }
 });
 
-// ---- controls ----
 els.toggle.addEventListener("click", () => (running ? stop() : start()));
 
 els.conf.addEventListener("input", () => {
@@ -49,13 +54,20 @@ els.conf.addEventListener("input", () => {
 });
 
 els.camera.addEventListener("change", () => {
-  if (running) { stop(); start(els.camera.value); }
+  if (running) {
+    stop();
+    start(els.camera.value);
+  }
 });
 
-// ---- camera ----
 async function start(deviceId) {
   try {
-    setStatus("Starting camera…");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus("Camera needs HTTPS or localhost.");
+      return;
+    }
+
+    setStatus("Starting camera...");
     const constraints = {
       video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" },
       audio: false,
@@ -64,14 +76,16 @@ async function start(deviceId) {
     els.video.srcObject = stream;
     await els.video.play();
 
-    await populateCameras();          // labels are available once permission is granted
+    await populateCameras();
     sizeCanvas();
     els.placeholder.style.display = "none";
     els.toggle.textContent = "Stop camera";
     running = true;
-    tracker.reset();
+    inFlight = false;
+    lastTime = performance.now();
+    smoothedFps = 0;
     setStatus("Detecting");
-    loop();
+    requestAnimationFrame(loop);
   } catch (err) {
     setStatus("Camera blocked or unavailable. Allow access and try again.");
     console.error(err);
@@ -80,26 +94,26 @@ async function start(deviceId) {
 
 function stop() {
   running = false;
-  if (stream) stream.getTracks().forEach((t) => t.stop());
+  if (stream) stream.getTracks().forEach((track) => track.stop());
   stream = null;
   ctx.clearRect(0, 0, els.overlay.width, els.overlay.height);
   els.placeholder.style.display = "grid";
   els.toggle.textContent = "Start camera";
-  els.fps.textContent = "FPS: —";
+  els.fps.textContent = "FPS: -";
   els.objects.textContent = "Objects: 0";
   setStatus("Ready");
 }
 
 async function populateCameras() {
   const devices = await navigator.mediaDevices.enumerateDevices();
-  const cams = devices.filter((d) => d.kind === "videoinput");
+  const cams = devices.filter((device) => device.kind === "videoinput");
   const current = stream.getVideoTracks()[0].getSettings().deviceId;
 
   els.camera.innerHTML = "";
-  cams.forEach((cam, i) => {
+  cams.forEach((cam, index) => {
     const opt = document.createElement("option");
     opt.value = cam.deviceId;
-    opt.textContent = cam.label || `Camera ${i + 1}`;
+    opt.textContent = cam.label || `Camera ${index + 1}`;
     if (cam.deviceId === current) opt.selected = true;
     els.camera.appendChild(opt);
   });
@@ -111,37 +125,71 @@ function sizeCanvas() {
   els.overlay.height = els.video.videoHeight;
 }
 
-// ---- detection loop ----
-let lastTime = performance.now();
-let smoothedFps = 0;
-
 async function loop() {
   if (!running) return;
 
-  const predictions = await model.detect(els.video);
-  const kept = predictions.filter((p) => p.score >= confThreshold);
-  const tracked = tracker.update(kept);
+  if (!inFlight && els.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    inFlight = true;
+    try {
+      const image = captureFrame();
+      const res = await fetch("/api/detect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          confidence: confThreshold,
+          image,
+        }),
+      });
 
-  draw(tracked);
-  els.objects.textContent = `Objects: ${tracked.length}`;
+      if (!res.ok) throw new Error(`detect failed: ${res.status}`);
+      const data = await res.json();
+      draw(data.detections, data.width, data.height);
+      updateStats(data.detections.length);
+      setStatus("Detecting");
+    } catch (err) {
+      setStatus("Detection server error.");
+      console.error(err);
+    } finally {
+      inFlight = false;
+    }
+  }
 
+  requestAnimationFrame(loop);
+}
+
+function captureFrame() {
+  const maxWidth = 640;
+  const scale = Math.min(1, maxWidth / els.video.videoWidth);
+  captureCanvas.width = Math.round(els.video.videoWidth * scale);
+  captureCanvas.height = Math.round(els.video.videoHeight * scale);
+  captureCtx.drawImage(els.video, 0, 0, captureCanvas.width, captureCanvas.height);
+  return captureCanvas.toDataURL("image/jpeg", 0.7);
+}
+
+function updateStats(count) {
+  els.objects.textContent = `Objects: ${count}`;
   const now = performance.now();
   const fps = 1000 / (now - lastTime);
   smoothedFps = smoothedFps ? smoothedFps * 0.85 + fps * 0.15 : fps;
   lastTime = now;
   els.fps.textContent = `FPS: ${smoothedFps.toFixed(1)}`;
-
-  requestAnimationFrame(loop);
 }
 
-function draw(items) {
+function draw(items, sourceWidth, sourceHeight) {
   ctx.clearRect(0, 0, els.overlay.width, els.overlay.height);
+  const xScale = els.overlay.width / sourceWidth;
+  const yScale = els.overlay.height / sourceHeight;
   ctx.lineWidth = Math.max(2, els.overlay.width / 400);
   ctx.font = `${Math.max(14, els.overlay.width / 45)}px Inter, sans-serif`;
   ctx.textBaseline = "top";
 
   for (const item of items) {
-    const [x, y, w, h] = item.bbox;
+    const [rawX, rawY, rawW, rawH] = item.bbox;
+    const x = rawX * xScale;
+    const y = rawY * yScale;
+    const w = rawW * xScale;
+    const h = rawH * yScale;
     const color = colorForId(item.id);
     const label = `${item.class} #${item.id} ${Math.round(item.score * 100)}%`;
 
@@ -167,61 +215,4 @@ function colorForId(id) {
 
 function setStatus(text) {
   els.status.textContent = text;
-}
-
-// =====================================================================
-// A minimal IoU tracker — links detections across frames so each object
-// keeps the same ID. (The Python app uses BoT-SORT; this is the browser
-// equivalent in spirit: greedy matching by box overlap.)
-// =====================================================================
-function IoUTracker(iouThreshold = 0.3, maxMissed = 15) {
-  let tracks = [];   // { id, bbox, cls, missed }
-  let nextId = 1;
-
-  this.reset = () => { tracks = []; nextId = 1; };
-
-  this.update = (detections) => {
-    const used = new Set();
-    const results = [];
-
-    // try to extend existing tracks first (highest IoU wins)
-    for (const track of tracks) {
-      let best = -1, bestIoU = iouThreshold;
-      detections.forEach((det, i) => {
-        if (used.has(i) || det.class !== track.cls) return;
-        const score = iou(track.bbox, det.bbox);
-        if (score > bestIoU) { bestIoU = score; best = i; }
-      });
-
-      if (best >= 0) {
-        used.add(best);
-        track.bbox = detections[best].bbox;
-        track.missed = 0;
-        results.push({ ...detections[best], id: track.id });
-      } else {
-        track.missed += 1;
-      }
-    }
-
-    // anything left over is a new object
-    detections.forEach((det, i) => {
-      if (used.has(i)) return;
-      const track = { id: nextId++, bbox: det.bbox, cls: det.class, missed: 0 };
-      tracks.push(track);
-      results.push({ ...det, id: track.id });
-    });
-
-    // drop tracks that have been missing too long
-    tracks = tracks.filter((t) => t.missed <= maxMissed);
-    return results;
-  };
-
-  function iou(a, b) {
-    const [ax, ay, aw, ah] = a, [bx, by, bw, bh] = b;
-    const x1 = Math.max(ax, bx), y1 = Math.max(ay, by);
-    const x2 = Math.min(ax + aw, bx + bw), y2 = Math.min(ay + ah, by + bh);
-    const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-    const union = aw * ah + bw * bh - inter;
-    return union > 0 ? inter / union : 0;
-  }
 }

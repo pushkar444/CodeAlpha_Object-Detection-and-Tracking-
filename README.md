@@ -1,166 +1,140 @@
-# CodeAlpha — Object Detection and Tracking
+# CodeAlpha - Object Detection and Tracking
 
-**CodeAlpha Artificial Intelligence Internship · Task 4**
+**CodeAlpha Artificial Intelligence Internship - Task 4**
 
-A real-time program that watches a webcam (or a video file), **detects objects**
-with a pre-trained **YOLOv8** model, and **tracks** each one across frames so it
-keeps a stable ID. Every object is drawn with a bounding box, its class label, a
-confidence score and a tracking ID — live, with an FPS readout.
+This project now has two entry points:
 
----
+- **Deployable website:** visitors open a normal HTTPS website, allow camera
+  permission, and the deployed Python server runs YOLO object detection.
+- **Local CLI tool:** `detect_track.py` still runs YOLOv8 + tracking directly on
+  your own machine for webcam/video-file experiments.
 
-## ✨ Features
+## Root Cause Fixed
 
-- **Real-time video input** from a webcam or a video file (OpenCV)
-- **Pre-trained YOLOv8** detector (auto-downloads on first run)
-- **Multi-object tracking** with **BoT-SORT** (a SORT-family tracker), so IDs
-  persist frame to frame
-- **Bounding boxes + labels + confidence + tracking ID**, each ID in its own colour
-- **Live FPS** and an active-object count overlay
-- **Class filtering** — track only what you care about (e.g. `person car`)
-- **Save mode** — write the annotated result to `output.mp4`
-- Clean command-line options via `argparse`
+The old web demo was static. It loaded TensorFlow.js and COCO-SSD from a CDN and
+ran detection in each visitor's browser. That meant another device needed to
+download the model, support the browser AI runtime, and have enough local
+processing power. The Python YOLO tracker existed only as a command-line program,
+so GitHub Pages could not run it for website visitors.
 
----
-
-## 🧠 How it works
+The website now calls a Flask backend:
 
 ```
-Webcam / video  ──►  YOLOv8 detects objects in each frame
-                ──►  BoT-SORT links detections across frames → stable IDs
-                ──►  OpenCV draws box + "class #id conf" + FPS overlay
-                ──►  shown live (and optionally saved to output.mp4)
+Browser camera -> /api/detect -> Flask + YOLOv8 on the server -> boxes + IDs
 ```
 
-- **Detection:** YOLO (You Only Look Once) is a single-pass detector — fast
-  enough for real time. The `yolov8n` (nano) weights keep it light.
-- **Tracking:** detection alone has no memory — box positions don't tell you that
-  "the car in frame 2 is the same car from frame 1." A tracker (BoT-SORT / SORT)
-  uses motion (a Kalman filter) and overlap (IoU) to associate detections over
-  time and assign each object a persistent ID.
+Visitors do not install Python, OpenCV, TensorFlow.js, YOLO, or any command-line
+tool. They only need a modern browser and camera permission.
 
-> Ultralytics bundles **BoT-SORT** (default) and **ByteTrack** — both are modern
-> members of the SORT family the task mentions. Pick one with `--tracker`.
-
----
-
-## 🛠 Tech stack
-
-| Part | Tool |
-|------|------|
-| Detection | Ultralytics YOLOv8 (PyTorch under the hood) |
-| Tracking | BoT-SORT / ByteTrack (bundled with Ultralytics) |
-| Video & drawing | OpenCV |
-| Maths / colours | numpy |
-
----
-
-## 📁 Structure
+## Project Structure
 
 ```
-CodeAlpha_ObjectDetectionTracking/
-├── detect_track.py     # the whole program (detection + tracking + display)
-├── requirements.txt
-├── .gitignore
-└── README.md
+.
+├── app.py              # Flask web server + YOLO detection API + server tracker
+├── detect_track.py     # optional local command-line YOLO/OpenCV tool
+├── docs/               # frontend served by app.py and usable as static assets
+├── web/                # same frontend copy for easy inspection/editing
+├── requirements.txt    # Python server dependencies
+├── Procfile            # gunicorn start command for deployment platforms
+└── yolov8n.pt          # optional local YOLOv8 nano weights
 ```
 
-## 🌐 Host the web demo
-This repo includes the browser demo in `docs/`, which is ready for GitHub Pages publishing.
-
-1. Go to your GitHub repo Settings → Pages.
-2. Select branch `main` and folder `/docs`.
-3. Save and wait for the site to appear at `https://pushkar444.github.io/CodeAlpha_Object-Detection-and-Tracking-/`.
-
----
-
-## ▶️ Run it
+## Run Locally
 
 ```bash
-# 1. (recommended) a virtual environment
-python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # macOS / Linux
+python -m venv .venv
+source .venv/bin/activate      # macOS/Linux
+# .venv\Scripts\activate       # Windows
 
-# 2. install dependencies (this also pulls in PyTorch — a large download)
 pip install -r requirements.txt
+python app.py
+```
 
-# 3. run on your webcam
+Open `http://localhost:8000`. Browsers allow camera access on `localhost`.
+
+## Deploy the Website
+
+Use a Python web host, not GitHub Pages. GitHub Pages only serves static files
+and cannot run `app.py`, YOLO, or OpenCV.
+
+### Render
+
+1. Push this repo to GitHub.
+2. Create a new **Blueprint** on Render from the repo, or create a normal
+   **Web Service**.
+3. Render can read `render.yaml` automatically. If you create the service
+   manually, use these settings:
+   - Build command: `pip install -r requirements.txt`
+   - Start command: `gunicorn app:app`
+   - Python version: 3.12.3
+4. Deploy and open the Render HTTPS URL.
+5. Click **Start camera** and allow camera permission.
+
+### Railway / VPS / Other Python Host
+
+Use the same commands:
+
+```bash
+pip install -r requirements.txt
+gunicorn app:app
+```
+
+The app reads `PORT` automatically when the platform provides it. You can also
+set `MODEL_PATH` if you want to use another YOLO weights file. If `yolov8n.pt`
+is not present on the deployed server, Ultralytics downloads the standard nano
+weights on first start.
+
+`requirements.txt` pins CPU-only PyTorch wheels so deployment hosts do not waste
+time or disk space downloading CUDA/GPU packages.
+
+The server also sets Ultralytics and Matplotlib config directories to `/tmp` so
+read-only home directories on deployment hosts do not break startup.
+
+## Browser Camera Requirements
+
+Camera access works only on:
+
+- `https://...` deployed URLs
+- `http://localhost...` for local testing
+
+Opening `docs/index.html` directly as a `file://` page will not work because
+the browser blocks camera access and there is no backend API.
+
+## API
+
+- `GET /api/health` checks that the server is running.
+- `POST /api/session` creates a tracking session.
+- `POST /api/detect` accepts a JPEG data URL and returns detections:
+
+```json
+{
+  "width": 640,
+  "height": 360,
+  "detections": [
+    { "id": 1, "class": "person", "score": 0.91, "bbox": [10, 20, 120, 240] }
+  ]
+}
+```
+
+## Optional Local CLI
+
+The original command-line script is still available:
+
+```bash
 python detect_track.py --source 0
-```
-
-### Choosing a camera (e.g. Camo instead of the built-in webcam)
-
-If you have more than one camera — laptop webcam, a phone-as-webcam app like
-**Camo**, OBS Virtual Camera, etc. — you can list them by name and pick one:
-
-```bash
-# list every camera with its name and resolution
-python detect_track.py --list-cameras
-#   Detected cameras:
-#     [0] Integrated Webcam  -  640x480
-#     [1] Camo               -  1280x720
-#     [2] OBS Virtual Camera -  640x480
-
-# select by name (case-insensitive, partial match works)
-python detect_track.py --source camo
-
-# select interactively from a menu
-python detect_track.py --source select
-
-# or jump straight to a known index
-python detect_track.py --source 1
-```
-
-> Camera **names** need `pygrabber` (Windows-only, in `requirements.txt`). Without
-> it the tool still works — it just labels cameras `camera 0`, `camera 1`, … and
-> you select by index.
-
-The first run downloads the `yolov8n.pt` weights (~6 MB) automatically. Press
-**`q`** in the preview window to quit.
-
-### More examples
-
-```bash
-# a video file, and save the annotated output
-python detect_track.py --source traffic.mp4 --save
-
-# only track people and cars, higher confidence
-python detect_track.py --source 0 --classes person car --conf 0.4
-
-# use the ByteTrack tracker instead of BoT-SORT
-python detect_track.py --source 0 --tracker bytetrack.yaml
-
-# save without opening a window (e.g. on a server)
 python detect_track.py --source traffic.mp4 --save --no-show
 ```
 
-### Options
+The server uses `opencv-python-headless` for deployment. If you want OpenCV GUI
+windows for the CLI preview on your own computer, install `opencv-python`
+locally in your virtual environment.
 
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `--source` | `0` | camera index (`0`/`1`/…), camera name (`camo`), `select` to pick interactively, or a video path/URL |
-| `--list-cameras` | off | list detected cameras (with names) and exit |
-| `--model` | `yolov8n.pt` | YOLO weights (`n`/`s`/`m`/`l`/`x` — bigger = more accurate, slower) |
-| `--conf` | `0.3` | minimum detection confidence |
-| `--tracker` | `botsort.yaml` | `botsort.yaml` or `bytetrack.yaml` |
-| `--classes` | all | class names to keep, e.g. `person car dog` |
-| `--save` | off | write `output.mp4` |
-| `--no-show` | off | don't open a preview window |
+## Notes
 
----
+- The deployed server does the AI work, so server CPU/GPU affects speed.
+- `yolov8n.pt` is the small YOLOv8 nano model; it is a good default for web
+  demos.
+- The browser sends resized JPEG frames to your server for processing. Deploy
+  only on HTTPS and use a trusted host.
 
-## 📝 Notes
-
-- A **GPU** makes this much faster, but it runs on CPU too (use `yolov8n` for
-  smoother CPU performance).
-- The 80 detectable classes come from the COCO dataset (person, car, dog, bottle,
-  laptop, …).
-- For the demo video, point it at street/traffic footage — lots of objects moving
-  through frame shows the tracking IDs off nicely.
-
----
-
-**Author:** Pushkar Kumar · pushkar.kumar.cs28@iilm.edu
-
-`#codealpha` `#artificialintelligence` `#internship` `#computervision` `#yolo` `#python`
+**Author:** Pushkar Kumar - pushkar.kumar.cs28@iilm.edu
