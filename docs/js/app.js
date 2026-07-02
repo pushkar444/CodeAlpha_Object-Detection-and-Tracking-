@@ -11,6 +11,7 @@ const els = {
   toggle: document.getElementById("toggle"),
   camera: document.getElementById("camera"),
   profile: document.getElementById("profile"),
+  quality: document.getElementById("quality"),
   conf: document.getElementById("conf"),
   confVal: document.getElementById("confVal"),
   fps: document.getElementById("fps"),
@@ -28,6 +29,12 @@ const profiles = {
   laptop: { cameraWidth: 960, cameraHeight: 540, detectWidth: 512, interval: 180, confidence: 0.35 },
 };
 
+const qualityModes = {
+  speed: { base: "lite_mobilenet_v2", widthScale: 0.85, intervalScale: 1.2, confidenceOffset: -0.05 },
+  balanced: { base: "lite_mobilenet_v2", widthScale: 1, intervalScale: 1, confidenceOffset: 0 },
+  accuracy: { base: "mobilenet_v2", widthScale: 1.35, intervalScale: 1.6, confidenceOffset: -0.05 },
+};
+
 let model = null;
 let stream = null;
 let running = false;
@@ -36,6 +43,8 @@ let lastTime = performance.now();
 let smoothedFps = 0;
 let lastDetectTime = 0;
 let activeProfile = getProfile();
+let activeQuality = getQuality();
+let loadedBase = null;
 const tracker = new IoUTracker();
 
 window.addEventListener("load", async () => {
@@ -45,7 +54,7 @@ window.addEventListener("load", async () => {
     setStatus("Loading model...");
     await tf.setBackend("webgl").catch(() => tf.setBackend("cpu"));
     await tf.ready();
-    model = await cocoSsd.load();
+    await loadModel();
     setStatus("Ready");
     els.toggle.disabled = false;
   } catch (err) {
@@ -70,6 +79,16 @@ els.profile.addEventListener("change", () => {
   }
 });
 
+els.quality.addEventListener("change", async () => {
+  activeQuality = getQuality();
+  activeProfile = getProfile();
+  applyProfileDefaults();
+  const shouldRestart = running;
+  const selectedCamera = els.camera.value;
+  await loadModel();
+  if (shouldRestart) start(selectedCamera);
+});
+
 els.camera.addEventListener("change", () => {
   if (running) {
     stop();
@@ -86,17 +105,18 @@ async function start(deviceId) {
 
     setStatus("Starting camera...");
     activeProfile = getProfile();
+    activeQuality = getQuality();
     const constraints = {
       video: deviceId
         ? {
             deviceId: { exact: deviceId },
-            width: { ideal: activeProfile.cameraWidth },
-            height: { ideal: activeProfile.cameraHeight },
+            width: { ideal: effectiveCameraWidth() },
+            height: { ideal: effectiveCameraHeight() },
           }
         : {
             facingMode: "environment",
-            width: { ideal: activeProfile.cameraWidth },
-            height: { ideal: activeProfile.cameraHeight },
+            width: { ideal: effectiveCameraWidth() },
+            height: { ideal: effectiveCameraHeight() },
           },
       audio: false,
     };
@@ -157,7 +177,7 @@ function sizeCanvas() {
 async function loop() {
   if (!running) return;
   const now = performance.now();
-  if (now - lastDetectTime < activeProfile.interval) {
+  if (now - lastDetectTime < effectiveInterval()) {
     requestAnimationFrame(loop);
     return;
   }
@@ -183,11 +203,24 @@ async function loop() {
 function prepareDetectionFrame() {
   const sourceWidth = els.video.videoWidth || 640;
   const sourceHeight = els.video.videoHeight || 480;
-  const scale = Math.min(1, activeProfile.detectWidth / sourceWidth);
+  const scale = Math.min(1, effectiveDetectWidth() / sourceWidth);
   detectCanvas.width = Math.max(1, Math.round(sourceWidth * scale));
   detectCanvas.height = Math.max(1, Math.round(sourceHeight * scale));
   detectCtx.drawImage(els.video, 0, 0, detectCanvas.width, detectCanvas.height);
   return { width: detectCanvas.width, height: detectCanvas.height };
+}
+
+async function loadModel() {
+  activeQuality = getQuality();
+  if (model && loadedBase === activeQuality.base) return;
+
+  if (running) stop();
+
+  setStatus(activeQuality.base === "mobilenet_v2" ? "Loading accuracy model..." : "Loading model...");
+  model = await cocoSsd.load({ base: activeQuality.base });
+  loadedBase = activeQuality.base;
+  setStatus("Ready");
+  els.toggle.disabled = false;
 }
 
 function getProfile() {
@@ -203,8 +236,30 @@ function getProfile() {
   return profiles.laptop;
 }
 
+function getQuality() {
+  return qualityModes[els.quality?.value || "balanced"] || qualityModes.balanced;
+}
+
+function effectiveCameraWidth() {
+  return Math.round(activeProfile.cameraWidth * Math.min(1.25, activeQuality.widthScale));
+}
+
+function effectiveCameraHeight() {
+  return Math.round(activeProfile.cameraHeight * Math.min(1.25, activeQuality.widthScale));
+}
+
+function effectiveDetectWidth() {
+  return Math.round(activeProfile.detectWidth * activeQuality.widthScale);
+}
+
+function effectiveInterval() {
+  return Math.round(activeProfile.interval * activeQuality.intervalScale);
+}
+
 function applyProfileDefaults() {
-  const confidence = Math.round(activeProfile.confidence * 100);
+  const confidence = Math.round(
+    Math.max(0.1, Math.min(0.9, activeProfile.confidence + activeQuality.confidenceOffset)) * 100
+  );
   els.conf.value = confidence;
   els.confVal.textContent = `${confidence}%`;
   confThreshold = activeProfile.confidence;

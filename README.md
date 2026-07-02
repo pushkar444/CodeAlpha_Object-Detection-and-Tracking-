@@ -95,6 +95,8 @@ This local CLI is separate from the deployed website.
   normal website loading JavaScript.
 - Speed depends on the visitor's browser/device, but no manual install is
   required.
+- Use **Mode -> Accuracy** on laptops or stronger tablets for better detection.
+  Use **Speed** on weaker phones if the camera feels laggy.
 - Server-side YOLO can be restored on a paid server with enough RAM/CPU by
   adding the PyTorch/Ultralytics dependencies back and using the Flask detection
   API version.

@@ -58,6 +58,15 @@
       </label>
 
       <label class="field">
+        <span>Mode</span>
+        <select id="quality">
+          <option value="balanced" selected>Balanced</option>
+          <option value="accuracy">Accuracy</option>
+          <option value="speed">Speed</option>
+        </select>
+      </label>
+
+      <label class="field">
         <span>Confidence: <b id="confVal">30%</b></span>
         <input id="conf" type="range" min="10" max="90" value="30" />
       </label>
