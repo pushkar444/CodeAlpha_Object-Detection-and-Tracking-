@@ -10,6 +10,7 @@ const els = {
   placeholder: document.getElementById("placeholder"),
   toggle: document.getElementById("toggle"),
   camera: document.getElementById("camera"),
+  profile: document.getElementById("profile"),
   conf: document.getElementById("conf"),
   confVal: document.getElementById("confVal"),
   fps: document.getElementById("fps"),
@@ -21,17 +22,26 @@ const ctx = els.overlay.getContext("2d");
 const detectCanvas = document.createElement("canvas");
 const detectCtx = detectCanvas.getContext("2d", { willReadFrequently: true });
 
+const profiles = {
+  mobile: { cameraWidth: 480, cameraHeight: 360, detectWidth: 320, interval: 450, confidence: 0.25 },
+  tablet: { cameraWidth: 640, cameraHeight: 480, detectWidth: 416, interval: 350, confidence: 0.3 },
+  laptop: { cameraWidth: 960, cameraHeight: 540, detectWidth: 512, interval: 180, confidence: 0.35 },
+};
+
 let model = null;
 let stream = null;
 let running = false;
 let confThreshold = 0.3;
 let lastTime = performance.now();
 let smoothedFps = 0;
-const detectWidth = 416;
+let lastDetectTime = 0;
+let activeProfile = getProfile();
 const tracker = new IoUTracker();
 
 window.addEventListener("load", async () => {
   try {
+    activeProfile = getProfile();
+    applyProfileDefaults();
     setStatus("Loading model...");
     await tf.setBackend("webgl").catch(() => tf.setBackend("cpu"));
     await tf.ready();
@@ -51,6 +61,15 @@ els.conf.addEventListener("input", () => {
   els.confVal.textContent = `${els.conf.value}%`;
 });
 
+els.profile.addEventListener("change", () => {
+  activeProfile = getProfile();
+  applyProfileDefaults();
+  if (running) {
+    stop();
+    start(els.camera.value);
+  }
+});
+
 els.camera.addEventListener("change", () => {
   if (running) {
     stop();
@@ -66,10 +85,19 @@ async function start(deviceId) {
     }
 
     setStatus("Starting camera...");
+    activeProfile = getProfile();
     const constraints = {
       video: deviceId
-        ? { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
-        : { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
+        ? {
+            deviceId: { exact: deviceId },
+            width: { ideal: activeProfile.cameraWidth },
+            height: { ideal: activeProfile.cameraHeight },
+          }
+        : {
+            facingMode: "environment",
+            width: { ideal: activeProfile.cameraWidth },
+            height: { ideal: activeProfile.cameraHeight },
+          },
       audio: false,
     };
     stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -83,6 +111,7 @@ async function start(deviceId) {
     running = true;
     tracker.reset();
     lastTime = performance.now();
+    lastDetectTime = 0;
     smoothedFps = 0;
     setStatus("Detecting");
     requestAnimationFrame(loop);
@@ -127,6 +156,12 @@ function sizeCanvas() {
 
 async function loop() {
   if (!running) return;
+  const now = performance.now();
+  if (now - lastDetectTime < activeProfile.interval) {
+    requestAnimationFrame(loop);
+    return;
+  }
+  lastDetectTime = now;
 
   try {
     const { width, height } = prepareDetectionFrame();
@@ -148,11 +183,31 @@ async function loop() {
 function prepareDetectionFrame() {
   const sourceWidth = els.video.videoWidth || 640;
   const sourceHeight = els.video.videoHeight || 480;
-  const scale = Math.min(1, detectWidth / sourceWidth);
+  const scale = Math.min(1, activeProfile.detectWidth / sourceWidth);
   detectCanvas.width = Math.max(1, Math.round(sourceWidth * scale));
   detectCanvas.height = Math.max(1, Math.round(sourceHeight * scale));
   detectCtx.drawImage(els.video, 0, 0, detectCanvas.width, detectCanvas.height);
   return { width: detectCanvas.width, height: detectCanvas.height };
+}
+
+function getProfile() {
+  const requested = els.profile?.value || "auto";
+  if (requested !== "auto") return profiles[requested];
+
+  const shortSide = Math.min(window.innerWidth, window.innerHeight);
+  const longSide = Math.max(window.innerWidth, window.innerHeight);
+  const memory = navigator.deviceMemory || 4;
+
+  if (shortSide <= 560 || memory <= 2) return profiles.mobile;
+  if (longSide <= 1180 || memory <= 4) return profiles.tablet;
+  return profiles.laptop;
+}
+
+function applyProfileDefaults() {
+  const confidence = Math.round(activeProfile.confidence * 100);
+  els.conf.value = confidence;
+  els.confVal.textContent = `${confidence}%`;
+  confThreshold = activeProfile.confidence;
 }
 
 function scalePredictions(predictions, sourceWidth, sourceHeight) {
