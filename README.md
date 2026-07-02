@@ -134,6 +134,8 @@ locally in your virtual environment.
 - The deployed server does the AI work, so server CPU/GPU affects speed.
 - `yolov8n.pt` is the small YOLOv8 nano model; it is a good default for web
   demos.
+- The browser sends small throttled frames to `/api/detect` so Render's free CPU
+  service has a better chance of keeping up.
 - The browser sends resized JPEG frames to your server for processing. Deploy
   only on HTTPS and use a trusted host.
 

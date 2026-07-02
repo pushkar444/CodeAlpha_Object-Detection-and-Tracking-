@@ -26,7 +26,9 @@ let sessionId = null;
 let confThreshold = 0.5;
 let inFlight = false;
 let lastTime = performance.now();
+let lastRequestTime = 0;
 let smoothedFps = 0;
+const detectIntervalMs = 500;
 
 window.addEventListener("load", async () => {
   try {
@@ -128,8 +130,14 @@ function sizeCanvas() {
 async function loop() {
   if (!running) return;
 
-  if (!inFlight && els.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+  const now = performance.now();
+  if (
+    !inFlight &&
+    now - lastRequestTime >= detectIntervalMs &&
+    els.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+  ) {
     inFlight = true;
+    lastRequestTime = now;
     try {
       const image = captureFrame();
       const res = await fetch("/api/detect", {
@@ -142,7 +150,10 @@ async function loop() {
         }),
       });
 
-      if (!res.ok) throw new Error(`detect failed: ${res.status}`);
+      if (!res.ok) {
+        const message = await readError(res);
+        throw new Error(`detect failed: ${res.status} ${message}`);
+      }
       const data = await res.json();
       draw(data.detections, data.width, data.height);
       updateStats(data.detections.length);
@@ -159,12 +170,21 @@ async function loop() {
 }
 
 function captureFrame() {
-  const maxWidth = 640;
+  const maxWidth = 416;
   const scale = Math.min(1, maxWidth / els.video.videoWidth);
   captureCanvas.width = Math.round(els.video.videoWidth * scale);
   captureCanvas.height = Math.round(els.video.videoHeight * scale);
   captureCtx.drawImage(els.video, 0, 0, captureCanvas.width, captureCanvas.height);
-  return captureCanvas.toDataURL("image/jpeg", 0.7);
+  return captureCanvas.toDataURL("image/jpeg", 0.6);
+}
+
+async function readError(res) {
+  try {
+    const data = await res.json();
+    return data.error || data.detail || "";
+  } catch {
+    return "";
+  }
 }
 
 function updateStats(count) {

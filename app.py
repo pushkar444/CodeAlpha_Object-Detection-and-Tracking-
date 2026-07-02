@@ -22,6 +22,7 @@ LOCAL_MODEL = BASE_DIR / "yolov8n.pt"
 DEFAULT_MODEL = str(LOCAL_MODEL) if LOCAL_MODEL.exists() else "yolov8n.pt"
 MODEL_PATH = os.environ.get("MODEL_PATH", DEFAULT_MODEL)
 CONFIDENCE = float(os.environ.get("MODEL_CONFIDENCE", "0.3"))
+IMAGE_SIZE = int(os.environ.get("MODEL_IMAGE_SIZE", "416"))
 TRACK_TTL_SECONDS = 120
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -64,8 +65,17 @@ def detect():
     if frame is None:
         return jsonify({"error": "invalid image"}), 400
 
-    with model_lock:
-        results = model.predict(frame, conf=threshold, verbose=False)
+    try:
+        with model_lock:
+            results = model.predict(
+                frame,
+                conf=threshold,
+                imgsz=IMAGE_SIZE,
+                verbose=False,
+            )
+    except Exception as exc:
+        app.logger.exception("Detection failed")
+        return jsonify({"error": "detection failed", "detail": str(exc)}), 500
 
     detections = result_to_detections(results[0])
     tracker = get_tracker(session_id)
