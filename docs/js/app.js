@@ -18,18 +18,23 @@ const els = {
 };
 
 const ctx = els.overlay.getContext("2d");
+const detectCanvas = document.createElement("canvas");
+const detectCtx = detectCanvas.getContext("2d", { willReadFrequently: true });
 
 let model = null;
 let stream = null;
 let running = false;
-let confThreshold = 0.5;
+let confThreshold = 0.3;
 let lastTime = performance.now();
 let smoothedFps = 0;
+const detectWidth = 416;
 const tracker = new IoUTracker();
 
 window.addEventListener("load", async () => {
   try {
     setStatus("Loading model...");
+    await tf.setBackend("webgl").catch(() => tf.setBackend("cpu"));
+    await tf.ready();
     model = await cocoSsd.load();
     setStatus("Ready");
     els.toggle.disabled = false;
@@ -62,7 +67,9 @@ async function start(deviceId) {
 
     setStatus("Starting camera...");
     const constraints = {
-      video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" },
+      video: deviceId
+        ? { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
+        : { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
       audio: false,
     };
     stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -122,9 +129,10 @@ async function loop() {
   if (!running) return;
 
   try {
-    const predictions = await model.detect(els.video);
+    const { width, height } = prepareDetectionFrame();
+    const predictions = await model.detect(detectCanvas);
     const kept = predictions.filter((prediction) => prediction.score >= confThreshold);
-    const tracked = tracker.update(kept);
+    const tracked = tracker.update(scalePredictions(kept, width, height));
 
     draw(tracked);
     updateStats(tracked.length);
@@ -135,6 +143,28 @@ async function loop() {
   }
 
   requestAnimationFrame(loop);
+}
+
+function prepareDetectionFrame() {
+  const sourceWidth = els.video.videoWidth || 640;
+  const sourceHeight = els.video.videoHeight || 480;
+  const scale = Math.min(1, detectWidth / sourceWidth);
+  detectCanvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  detectCanvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  detectCtx.drawImage(els.video, 0, 0, detectCanvas.width, detectCanvas.height);
+  return { width: detectCanvas.width, height: detectCanvas.height };
+}
+
+function scalePredictions(predictions, sourceWidth, sourceHeight) {
+  const xScale = els.overlay.width / sourceWidth;
+  const yScale = els.overlay.height / sourceHeight;
+  return predictions.map((prediction) => {
+    const [x, y, w, h] = prediction.bbox;
+    return {
+      ...prediction,
+      bbox: [x * xScale, y * yScale, w * xScale, h * yScale],
+    };
+  });
 }
 
 function updateStats(count) {
