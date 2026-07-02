@@ -8,7 +8,3 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.3
-      - key: YOLO_CONFIG_DIR
-        value: /tmp/Ultralytics
-      - key: MPLCONFIGDIR
-        value: /tmp/matplotlib

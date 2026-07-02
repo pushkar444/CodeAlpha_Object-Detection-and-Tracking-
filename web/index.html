@@ -4,20 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Live Object Detection &amp; Tracking</title>
-  <meta name="description" content="Real-time object detection and tracking powered by a deployed YOLO server. Visitors only need a browser and camera permission." />
+  <meta name="description" content="Real-time object detection and tracking in the browser. Visitors only need a browser and camera permission." />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
 
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
   <script defer src="js/app.js"></script>
 </head>
 <body>
   <main class="wrap">
     <header class="head">
       <h1>Live Object Detection &amp; Tracking</h1>
-      <p>Runs from the deployed YOLO server. Visitors only allow camera access in the browser.</p>
+      <p>Runs in the browser from your deployed website. Visitors only allow camera access.</p>
     </header>
 
     <section class="stage">
@@ -26,7 +28,7 @@
         <canvas id="overlay"></canvas>
         <div class="placeholder" id="placeholder">
           <p>Press <strong>Start camera</strong> to begin.</p>
-          <p class="hint">You'll be asked for camera permission. Frames are processed by the app server.</p>
+          <p class="hint">You'll be asked for camera permission. No software install is needed.</p>
         </div>
       </div>
 

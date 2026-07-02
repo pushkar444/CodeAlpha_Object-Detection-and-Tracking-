@@ -1,9 +1,2 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.5.1+cpu
-torchvision==0.20.1+cpu
-ultralytics>=8.2.0
-opencv-python-headless>=4.8.0
-numpy>=1.24
 Flask>=3.0.0
 gunicorn>=22.0.0
-pygrabber>=0.2          ; sys_platform == "win32"   # camera names on Windows (optional)
